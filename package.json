@@ -1,0 +1,41 @@
+{
+  "name": "webhook-relay-logger",
+  "version": "1.0.0",
+  "description": "Production-ready webhook relay and logging system",
+  "private": true,
+  "workspaces": [
+    "receiver-service",
+    "logger-service",
+    "forwarder-service",
+    "dashboard-service",
+    "shared"
+  ],
+  "scripts": {
+    "install:all": "npm install && npm run install:services",
+    "install:services": "npm install --workspace=receiver-service && npm install --workspace=logger-service && npm install --workspace=forwarder-service && npm install --workspace=dashboard-service && npm install --workspace=shared",
+    "dev:receiver": "npm run dev --workspace=receiver-service",
+    "dev:logger": "npm run dev --workspace=logger-service",
+    "dev:forwarder": "npm run dev --workspace=forwarder-service",
+    "dev:dashboard": "npm run dev --workspace=dashboard-service",
+    "build:all": "npm run build --workspaces",
+    "docker:build": "docker-compose build",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "docker:logs": "docker-compose logs -f",
+    "prisma:generate": "cd shared && npx prisma generate",
+    "prisma:migrate": "cd shared && npx prisma migrate dev",
+    "prisma:studio": "cd shared && npx prisma studio",
+    "test:local": "npm run docker:up && sleep 10 && npm run test:e2e",
+    "k8s:deploy": "kubectl apply -f k8s/",
+    "k8s:delete": "kubectl delete -f k8s/"
+  },
+  "keywords": [
+    "webhook",
+    "relay",
+    "logger",
+    "microservices",
+    "kubernetes"
+  ],
+  "author": "Bob",
+  "license": "MIT"
+}

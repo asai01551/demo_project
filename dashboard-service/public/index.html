@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Webhook Relay Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #f5f7fa;
+            color: #2c3e50;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        header {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        h1 {
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }
+        .api-key-input {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        input {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        button {
+            padding: 10px 20px;
+            background: #3498db;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        button:hover {
+            background: #2980b9;
+        }
+        .endpoints-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        .endpoint-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .endpoint-card h3 {
+            margin-bottom: 10px;
+            color: #2c3e50;
+        }
+        .endpoint-url {
+            color: #7f8c8d;
+            font-size: 12px;
+            word-break: break-all;
+            margin-bottom: 15px;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin-top: 15px;
+        }
+        .stat {
+            text-align: center;
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 4px;
+        }
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #3498db;
+        }
+        .stat-label {
+            font-size: 12px;
+            color: #7f8c8d;
+            margin-top: 5px;
+        }
+        .status {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        .status-active {
+            background: #d4edda;
+            color: #155724;
+        }
+        .status-inactive {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .events-section {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-top: 20px;
+        }
+        .event-item {
+            padding: 15px;
+            border-bottom: 1px solid #eee;
+            cursor: pointer;
+        }
+        .event-item:hover {
+            background: #f8f9fa;
+        }
+        .event-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+        .event-id {
+            font-family: monospace;
+            font-size: 12px;
+            color: #7f8c8d;
+        }
+        .badge {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: bold;
+        }
+        .badge-pending { background: #fff3cd; color: #856404; }
+        .badge-forwarding { background: #cce5ff; color: #004085; }
+        .badge-delivered { background: #d4edda; color: #155724; }
+        .badge-failed { background: #f8d7da; color: #721c24; }
+        .hidden {
+            display: none;
+        }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #7f8c8d;
+        }
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🔗 Webhook Relay Dashboard</h1>
+            <p>Monitor and manage your webhook endpoints</p>
+            <div class="api-key-input">
+                <input type="text" id="apiKeyInput" placeholder="Enter your API key">
+                <button onclick="loadDashboard()">Load Dashboard</button>
+            </div>
+        </header>
+
+        <div id="content" class="hidden">
+            <h2>Your Endpoints</h2>
+            <div id="endpoints" class="endpoints-grid"></div>
+
+            <div class="events-section">
+                <h2>Recent Webhook Events</h2>
+                <div id="events"></div>
+            </div>
+        </div>
+
+        <div id="loading" class="loading hidden">Loading...</div>
+        <div id="error" class="error hidden"></div>
+    </div>
+
+    <script>
+        let apiKey = '';
+
+        async function loadDashboard() {
+            apiKey = document.getElementById('apiKeyInput').value;
+            if (!apiKey) {
+                showError('Please enter an API key');
+                return;
+            }
+
+            showLoading();
+            try {
+                const response = await fetch('/api/endpoints', {
+                    headers: { 'X-API-Key': apiKey }
+                });
+
+                if (!response.ok) {
+                    throw new Error('Invalid API key or server error');
+                }
+
+                const data = await response.json();
+                displayEndpoints(data.endpoints);
+                document.getElementById('content').classList.remove('hidden');
+                hideLoading();
+            } catch (error) {
+                showError(error.message);
+                hideLoading();
+            }
+        }
+
+        function displayEndpoints(endpoints) {
+            const container = document.getElementById('endpoints');
+            container.innerHTML = '';
+
+            endpoints.forEach(endpoint => {
+                const stats = endpoint.stats[0] || { totalReceived: 0, totalDelivered: 0, totalFailed: 0 };
+                
+                const card = document.createElement('div');
+                card.className = 'endpoint-card';
+                card.innerHTML = `
+                    <div style="display: flex; justify-content: space-between; align-items: start;">
+                        <h3>${endpoint.name}</h3>
+                        <span class="status ${endpoint.isActive ? 'status-active' : 'status-inactive'}">
+                            ${endpoint.isActive ? 'Active' : 'Inactive'}
+                        </span>
+                    </div>
+                    <div class="endpoint-url">${endpoint.destinationUrl}</div>
+                    <div class="stats">
+                        <div class="stat">
+                            <div class="stat-value">${stats.totalReceived}</div>
+                            <div class="stat-label">Received</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-value">${stats.totalDelivered}</div>
+                            <div class="stat-label">Delivered</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-value">${stats.totalFailed}</div>
+                            <div class="stat-label">Failed</div>
+                        </div>
+                    </div>
+                    <button onclick="loadEvents('${endpoint.id}')" style="margin-top: 15px; width: 100%;">
+                        View Events
+                    </button>
+                `;
+                container.appendChild(card);
+            });
+        }
+
+        async function loadEvents(endpointId) {
+            showLoading();
+            try {
+                const response = await fetch(`/api/endpoints/${endpointId}/events?limit=20`, {
+                    headers: { 'X-API-Key': apiKey }
+                });
+
+                if (!response.ok) throw new Error('Failed to load events');
+
+                const data = await response.json();
+                displayEvents(data.events);
+                hideLoading();
+            } catch (error) {
+                showError(error.message);
+                hideLoading();
+            }
+        }
+
+        function displayEvents(events) {
+            const container = document.getElementById('events');
+            container.innerHTML = '';
+
+            if (events.length === 0) {
+                container.innerHTML = '<p style="text-align: center; color: #7f8c8d; padding: 20px;">No events found</p>';
+                return;
+            }
+
+            events.forEach(event => {
+                const item = document.createElement('div');
+                item.className = 'event-item';
+                item.innerHTML = `
+                    <div class="event-header">
+                        <span class="event-id">${event.id}</span>
+                        <span class="badge badge-${event.status}">${event.status.toUpperCase()}</span>
+                    </div>
+                    <div style="font-size: 12px; color: #7f8c8d;">
+                        ${new Date(event.receivedAt).toLocaleString()}
+                        ${event.deliveryAttempts.length > 0 ? `• ${event.deliveryAttempts.length} attempts` : ''}
+                    </div>
+                `;
+                container.appendChild(item);
+            });
+        }
+
+        function showLoading() {
+            document.getElementById('loading').classList.remove('hidden');
+        }
+
+        function hideLoading() {
+            document.getElementById('loading').classList.add('hidden');
+        }
+
+        function showError(message) {
+            const errorDiv = document.getElementById('error');
+            errorDiv.textContent = message;
+            errorDiv.classList.remove('hidden');
+            setTimeout(() => errorDiv.classList.add('hidden'), 5000);
+        }
+    </script>
+</body>
+</html>

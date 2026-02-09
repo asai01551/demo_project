@@ -1,0 +1,124 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: webhook-postgres
+    environment:
+      POSTGRES_DB: webhook_relay
+      POSTGRES_USER: webhook_user
+      POSTGRES_PASSWORD: webhook_pass
+    ports:
+      - "5434:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U webhook_user"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: webhook-redis
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  receiver-service:
+    build:
+      context: .
+      dockerfile: receiver-service/Dockerfile
+    container_name: webhook-receiver
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://webhook_user:webhook_pass@postgres:5432/webhook_relay
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - RECEIVER_PORT=3001
+      - AWS_REGION=${AWS_REGION}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - S3_BUCKET_NAME=${S3_BUCKET_NAME}
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  logger-service:
+    build:
+      context: .
+      dockerfile: logger-service/Dockerfile
+    container_name: webhook-logger
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://webhook_user:webhook_pass@postgres:5432/webhook_relay
+      - LOGGER_PORT=3002
+      - AWS_REGION=${AWS_REGION}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - S3_BUCKET_NAME=${S3_BUCKET_NAME}
+    ports:
+      - "3002:3002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  forwarder-service:
+    build:
+      context: .
+      dockerfile: forwarder-service/Dockerfile
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://webhook_user:webhook_pass@postgres:5432/webhook_relay
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - AWS_REGION=${AWS_REGION}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - S3_BUCKET_NAME=${S3_BUCKET_NAME}
+      - MAX_RETRY_ATTEMPTS=3
+      - RETRY_DELAY_MS=300000
+      - RETRY_BACKOFF_MULTIPLIER=2
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  dashboard-service:
+    build:
+      context: .
+      dockerfile: dashboard-service/Dockerfile
+    container_name: webhook-dashboard
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://webhook_user:webhook_pass@postgres:5432/webhook_relay
+      - DASHBOARD_PORT=3004
+      - LOGGER_URL=http://logger-service:3002
+    ports:
+      - "3004:3004"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  default:
+    name: webhook-network
+
+# Made with Bob

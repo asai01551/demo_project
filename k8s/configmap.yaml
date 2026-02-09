@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: webhook-relay-config
+  namespace: webhook-relay
+data:
+  NODE_ENV: "production"
+  LOG_LEVEL: "info"
+  RECEIVER_PORT: "3001"
+  LOGGER_PORT: "3002"
+  FORWARDER_PORT: "3003"
+  DASHBOARD_PORT: "3004"
+  REDIS_HOST: "redis-service"
+  REDIS_PORT: "6379"
+  MAX_RETRY_ATTEMPTS: "3"
+  RETRY_DELAY_MS: "300000"
+  RETRY_BACKOFF_MULTIPLIER: "2"
+  LOGGER_URL: "http://logger-service:3002"
+
+# Made with Bob
