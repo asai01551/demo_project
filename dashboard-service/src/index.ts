@@ -7,7 +7,8 @@ import { createServiceLogger, connectDatabase } from 'shared';
 import apiRouter from './routes/api';
 import healthRouter from './routes/health';
 
-dotenv.config();
+// Load .env from project root
+dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
 const app = express();
 const PORT = process.env.DASHBOARD_PORT || 3004;

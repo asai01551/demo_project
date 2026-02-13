@@ -3,12 +3,14 @@ import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import dotenv from 'dotenv';
+import path from 'path';
 import { createServiceLogger, connectDatabase, redisQueue } from 'shared';
 import webhookRouter from './routes/webhook';
 import healthRouter from './routes/health';
 import { errorHandler } from './middleware/errorHandler';
 
-dotenv.config();
+// Load .env from project root
+dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
 const app = express();
 const PORT = process.env.RECEIVER_PORT || 3001;

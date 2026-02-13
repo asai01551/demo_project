@@ -1,9 +1,11 @@
 import dotenv from 'dotenv';
+import path from 'path';
 import { createServiceLogger, connectDatabase, redisQueue } from 'shared';
 import { WebhookForwarder } from './forwarder';
 import { RetryScheduler } from './retryScheduler';
 
-dotenv.config();
+// Load .env from project root
+dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
 const logger = createServiceLogger('forwarder-service');
 

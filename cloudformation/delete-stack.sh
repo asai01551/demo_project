@@ -15,6 +15,7 @@ NC='\033[0m' # No Color
 # Default values
 STACK_NAME="webhook-relay-prod"
 REGION="us-east-1"
+FORCE=false
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -27,12 +28,17 @@ while [[ $# -gt 0 ]]; do
             REGION="$2"
             shift 2
             ;;
+        --force)
+            FORCE=true
+            shift
+            ;;
         --help)
             echo "Usage: ./delete-stack.sh [OPTIONS]"
             echo ""
             echo "Options:"
             echo "  --stack-name NAME     CloudFormation stack name (default: webhook-relay-prod)"
             echo "  --region REGION       AWS region (default: us-east-1)"
+            echo "  --force               Skip confirmation prompt"
             echo "  --help                Show this help message"
             echo ""
             exit 0
@@ -57,27 +63,62 @@ if ! aws cloudformation describe-stacks --stack-name $STACK_NAME --region $REGIO
     exit 1
 fi
 
+# Get S3 bucket name from stack outputs
+echo -e "${GREEN}📋 Getting stack resources...${NC}"
+S3_BUCKET=$(aws cloudformation describe-stacks \
+    --stack-name $STACK_NAME \
+    --region $REGION \
+    --query 'Stacks[0].Outputs[?OutputKey==`S3BucketName`].OutputValue' \
+    --output text 2>/dev/null || echo "")
+
 echo -e "${YELLOW}⚠️  WARNING: This will delete the following resources:${NC}"
 echo "  - VPC and all networking components"
 echo "  - RDS PostgreSQL database (snapshot will be created)"
 echo "  - ElastiCache Redis cluster"
-echo "  - S3 bucket (will be retained with data)"
+echo "  - S3 bucket and ALL its contents: ${S3_BUCKET:-'(not found)'}"
 echo "  - IAM roles and policies"
 echo "  - CloudWatch log groups"
 echo "  - Secrets Manager secrets"
 echo ""
 echo -e "${RED}This action cannot be undone!${NC}"
+echo -e "${RED}All webhook payloads in S3 will be permanently deleted!${NC}"
 echo ""
 
-read -p "Are you sure you want to delete stack '$STACK_NAME'? (type 'yes' to confirm): " CONFIRM
+if [ "$FORCE" = false ]; then
+    read -p "Are you sure you want to delete stack '$STACK_NAME'? (type 'yes' to confirm): " CONFIRM
+    
+    if [ "$CONFIRM" != "yes" ]; then
+        echo "Deletion cancelled"
+        exit 0
+    fi
+else
+    echo -e "${YELLOW}⚠️  Force mode enabled - skipping confirmation${NC}"
+fi
 
-if [ "$CONFIRM" != "yes" ]; then
-    echo "Deletion cancelled"
-    exit 0
+# Empty and delete S3 bucket first if it exists
+if [ -n "$S3_BUCKET" ] && [ "$S3_BUCKET" != "None" ]; then
+    echo ""
+    echo -e "${GREEN}🗑️  Emptying S3 bucket: $S3_BUCKET${NC}"
+    
+    # Check if bucket exists
+    if aws s3 ls "s3://$S3_BUCKET" --region $REGION &> /dev/null; then
+        # Delete all objects and versions
+        aws s3 rm "s3://$S3_BUCKET" --recursive --region $REGION || true
+        
+        # Delete all versions if versioning is enabled
+        aws s3api delete-objects --bucket "$S3_BUCKET" --region $REGION \
+            --delete "$(aws s3api list-object-versions --bucket "$S3_BUCKET" --region $REGION \
+            --query '{Objects: Versions[].{Key:Key,VersionId:VersionId}}' --max-items 1000)" \
+            2>/dev/null || true
+        
+        echo -e "${GREEN}✅ S3 bucket emptied${NC}"
+    else
+        echo -e "${YELLOW}⚠️  S3 bucket not found or already deleted${NC}"
+    fi
 fi
 
 echo ""
-echo -e "${GREEN}🗑️  Deleting stack...${NC}"
+echo -e "${GREEN}🗑️  Deleting CloudFormation stack...${NC}"
 
 aws cloudformation delete-stack \
     --stack-name $STACK_NAME \
@@ -97,9 +138,18 @@ if [ $? -eq 0 ]; then
     echo -e "${GREEN}✅ Stack deleted successfully!${NC}"
     echo -e "${GREEN}========================================${NC}"
     echo ""
-    echo -e "${YELLOW}Note: S3 bucket was retained and still contains data.${NC}"
-    echo "To delete the S3 bucket manually:"
-    echo "  aws s3 rb s3://${STACK_NAME}-payloads-<account-id> --force --region $REGION"
+    
+    # Delete S3 bucket if it still exists
+    if [ -n "$S3_BUCKET" ] && [ "$S3_BUCKET" != "None" ]; then
+        if aws s3 ls "s3://$S3_BUCKET" --region $REGION &> /dev/null; then
+            echo -e "${GREEN}🗑️  Deleting S3 bucket: $S3_BUCKET${NC}"
+            aws s3 rb "s3://$S3_BUCKET" --force --region $REGION || true
+            echo -e "${GREEN}✅ S3 bucket deleted${NC}"
+        fi
+    fi
+    
+    echo ""
+    echo -e "${GREEN}All resources have been deleted!${NC}"
 else
     echo ""
     echo -e "${RED}========================================${NC}"

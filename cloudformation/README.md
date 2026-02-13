@@ -1,328 +1,262 @@
-# CloudFormation Deployment Guide
+# CloudFormation Deployment Scripts
 
-Complete AWS infrastructure for Webhook Relay & Logger using CloudFormation.
-
-## 📋 What Gets Created
-
-### Networking
-- ✅ VPC with public and private subnets across 2 AZs
-- ✅ Internet Gateway and NAT Gateway
-- ✅ Route tables and security groups
-
-### Database & Cache
-- ✅ RDS PostgreSQL 15.4 (Multi-AZ, db.t3.medium)
-- ✅ ElastiCache Redis 7.0 (cache.t3.medium)
-- ✅ Automated backups and maintenance windows
-
-### Storage
-- ✅ S3 bucket with versioning enabled
-- ✅ Lifecycle policies (archive after 90 days, delete after 365 days)
-- ✅ Server-side encryption (AES256)
-- ✅ Public access blocked
-
-### Security
-- ✅ IAM roles and policies for services
-- ✅ Secrets Manager for database credentials
-- ✅ Security groups with least privilege access
-
-### Monitoring
-- ✅ CloudWatch Log Groups for all services
-- ✅ 30-day log retention
-
-### Tags
-All resources are tagged with:
-- `Project: webhook-relay`
-- `ManagedBy: CloudFormation`
-- `Environment: production`
+Quick reference for deploying and managing the Webhook Relay infrastructure on AWS.
 
 ## 🚀 Quick Start
 
-### 1. Deploy the Stack
-
+### Deploy to AWS
 ```bash
-cd cloudformation
-./deploy.sh --stack-name webhook-relay-prod --region us-east-1
+./deploy.sh
 ```
 
-You'll be prompted for:
-- Database password (min 8 characters)
-- Confirmation to proceed
-
-**Deployment time:** ~15-20 minutes
-
-### 2. Get Stack Outputs
-
-After deployment completes:
-
+### Delete Everything
 ```bash
-./get-outputs.sh --stack-name webhook-relay-prod
+./cleanup-all.sh --delete-local-bucket
 ```
 
-This shows:
-- RDS endpoint and port
-- Redis endpoint and port
+## 📋 Available Scripts
+
+### `deploy.sh` - Deploy Infrastructure
+
+Deploys the complete CloudFormation stack with all AWS resources.
+
+```bash
+# Basic deployment
+./deploy.sh
+
+# Custom deployment
+./deploy.sh \
+  --stack-name my-webhook-relay \
+  --region us-west-2 \
+  --db-password MySecurePass123
+```
+
+**Options:**
+- `--stack-name NAME` - Stack name (default: webhook-relay-prod)
+- `--region REGION` - AWS region (default: us-east-1)
+- `--db-password PASS` - Database password (prompts if not provided)
+- `--help` - Show help
+
+**Creates:**
+- VPC with public/private subnets
+- RDS PostgreSQL database
+- ElastiCache Redis cluster
+- S3 bucket for payloads
+- IAM roles and security groups
+- CloudWatch log groups
+
+**Time:** ~15-20 minutes
+
+---
+
+### `delete-stack.sh` - Delete CloudFormation Stack
+
+Deletes the CloudFormation stack and associated resources.
+
+```bash
+# Interactive deletion
+./delete-stack.sh
+
+# Force deletion (no confirmation)
+./delete-stack.sh --force
+
+# Custom stack
+./delete-stack.sh \
+  --stack-name my-webhook-relay \
+  --region us-west-2
+```
+
+**Options:**
+- `--stack-name NAME` - Stack name (default: webhook-relay-prod)
+- `--region REGION` - AWS region (default: us-east-1)
+- `--force` - Skip confirmation prompt
+- `--help` - Show help
+
+**Deletes:**
+- All CloudFormation resources
+- S3 bucket and contents
+- Database snapshots (retained)
+
+**Time:** ~10-15 minutes
+
+---
+
+### `cleanup-all.sh` - Complete Cleanup
+
+Comprehensive cleanup that removes ALL AWS resources including locally created buckets.
+
+```bash
+# Complete cleanup
+./cleanup-all.sh --delete-local-bucket
+
+# Stack only (keep local buckets)
+./cleanup-all.sh
+
+# Custom configuration
+./cleanup-all.sh \
+  --stack-name my-webhook-relay \
+  --region us-west-2 \
+  --delete-local-bucket
+```
+
+**Options:**
+- `--stack-name NAME` - Stack name (default: webhook-relay-prod)
+- `--region REGION` - AWS region (default: us-east-1)
+- `--delete-local-bucket` - Also delete locally created S3 buckets
+- `--help` - Show help
+
+**Deletes:**
+- CloudFormation stack
+- All stack resources
+- S3 buckets created by CloudFormation
+- Locally created S3 buckets (with --delete-local-bucket)
+
+**Confirmation:** Type `DELETE EVERYTHING`
+
+**Time:** ~10-15 minutes
+
+---
+
+### `get-outputs.sh` - Get Stack Information
+
+Retrieves and displays CloudFormation stack outputs.
+
+```bash
+# Get outputs
+./get-outputs.sh
+
+# Custom stack
+./get-outputs.sh \
+  --stack-name my-webhook-relay \
+  --region us-west-2
+```
+
+**Shows:**
+- RDS endpoint
+- Redis endpoint
 - S3 bucket name
-- Database connection string
-- IAM role ARNs
+- VPC and subnet IDs
+- Security group IDs
 
-### 3. Export as Environment Variables
+---
 
-```bash
-source <(./get-outputs.sh --stack-name webhook-relay-prod --env)
+## 📊 Deployment Flow
+
+```
+1. Run deploy.sh
+   ↓
+2. Wait 15-20 minutes
+   ↓
+3. Get outputs with get-outputs.sh
+   ↓
+4. Update .env file
+   ↓
+5. Run database migrations
+   ↓
+6. Deploy application
+   ↓
+7. Test endpoints
 ```
 
-### 4. Update Your Application
+## 🗑️ Cleanup Flow
 
-Update your `.env` file with the outputs:
-
-```bash
-DATABASE_URL=<DatabaseURL from outputs>
-REDIS_HOST=<RedisEndpoint from outputs>
-REDIS_PORT=<RedisPort from outputs>
-S3_BUCKET_NAME=<S3BucketName from outputs>
-AWS_REGION=us-east-1
+```
+1. Run cleanup-all.sh --delete-local-bucket
+   ↓
+2. Confirm with "DELETE EVERYTHING"
+   ↓
+3. Wait 10-15 minutes
+   ↓
+4. All resources deleted
 ```
 
-### 5. Run Database Migrations
+## 💰 Cost Estimate
 
+**Monthly AWS costs:**
+- RDS (db.t3.micro): ~$15-20
+- Redis (cache.t3.micro): ~$12-15
+- S3 Storage: ~$1-2
+- Data Transfer: ~$5-10
+- CloudWatch: ~$2-5
+
+**Total:** ~$35-52/month
+
+## 🔍 Monitoring
+
+### Check Stack Status
 ```bash
-cd ../shared
-npx prisma migrate deploy
-```
-
-## 🔧 Advanced Usage
-
-### Custom Stack Name
-
-```bash
-./deploy.sh --stack-name my-webhook-stack --region us-west-2
-```
-
-### Update Existing Stack
-
-```bash
-aws cloudformation update-stack \
+aws cloudformation describe-stacks \
   --stack-name webhook-relay-prod \
-  --template-body file://webhook-relay-stack.yaml \
-  --parameters \
-    ParameterKey=EnvironmentName,UsePreviousValue=true \
-    ParameterKey=DBPassword,UsePreviousValue=true \
-  --capabilities CAPABILITY_NAMED_IAM \
   --region us-east-1
 ```
 
 ### View Stack Events
-
 ```bash
 aws cloudformation describe-stack-events \
   --stack-name webhook-relay-prod \
-  --region us-east-1 \
-  --max-items 20
+  --region us-east-1
 ```
 
-### Get Specific Output
-
+### Check Resources
 ```bash
-aws cloudformation describe-stacks \
+aws cloudformation describe-stack-resources \
   --stack-name webhook-relay-prod \
-  --query 'Stacks[0].Outputs[?OutputKey==`DatabaseURL`].OutputValue' \
-  --output text
-```
-
-## 🗑️ Tear Down
-
-### Delete the Stack
-
-```bash
-./delete-stack.sh --stack-name webhook-relay-prod --region us-east-1
-```
-
-**Important Notes:**
-- RDS will create a final snapshot before deletion
-- S3 bucket is retained (DeletionPolicy: Retain)
-- Deletion takes ~10-15 minutes
-
-### Manually Delete S3 Bucket
-
-After stack deletion, if you want to delete the S3 bucket:
-
-```bash
-# List bucket contents
-aws s3 ls s3://webhook-relay-prod-payloads-<account-id>
-
-# Delete bucket and all contents
-aws s3 rb s3://webhook-relay-prod-payloads-<account-id> --force
-```
-
-## 💰 Cost Estimation
-
-Monthly costs (us-east-1, approximate):
-
-| Resource | Type | Monthly Cost |
-|----------|------|--------------|
-| RDS PostgreSQL | db.t3.medium Multi-AZ | ~$120 |
-| ElastiCache Redis | cache.t3.medium | ~$50 |
-| NAT Gateway | 1 gateway | ~$32 |
-| S3 Storage | 100GB + requests | ~$3-10 |
-| Data Transfer | Varies | ~$10-50 |
-| **Total** | | **~$215-262/month** |
-
-### Cost Optimization Tips
-
-1. **Use Reserved Instances** for RDS and ElastiCache (~40% savings)
-2. **Single AZ** for non-production (remove Multi-AZ from RDS)
-3. **Smaller instances** for dev/test:
-   - RDS: db.t3.small (~$30/month)
-   - Redis: cache.t3.micro (~$12/month)
-4. **S3 Lifecycle** policies already configured
-5. **Remove NAT Gateway** if services don't need internet access
-
-## 🔐 Security Best Practices
-
-### 1. Rotate Database Password
-
-```bash
-# Update in Secrets Manager
-aws secretsmanager update-secret \
-  --secret-id webhook-relay-prod/database \
-  --secret-string '{"username":"webhook_admin","password":"NEW_PASSWORD",...}'
-
-# Update RDS
-aws rds modify-db-instance \
-  --db-instance-identifier webhook-relay-prod-postgres \
-  --master-user-password NEW_PASSWORD
-```
-
-### 2. Enable Enhanced Monitoring
-
-Add to RDS configuration:
-```yaml
-MonitoringInterval: 60
-MonitoringRoleArn: !GetAtt RDSMonitoringRole.Arn
-```
-
-### 3. Enable VPC Flow Logs
-
-```bash
-aws ec2 create-flow-logs \
-  --resource-type VPC \
-  --resource-ids <vpc-id> \
-  --traffic-type ALL \
-  --log-destination-type cloud-watch-logs \
-  --log-group-name /aws/vpc/webhook-relay
-```
-
-### 4. Enable AWS Config
-
-Track configuration changes:
-```bash
-aws configservice put-configuration-recorder \
-  --configuration-recorder name=webhook-relay-config \
-  --recording-group allSupported=true
-```
-
-## 📊 Monitoring
-
-### CloudWatch Dashboards
-
-Create a dashboard:
-```bash
-aws cloudwatch put-dashboard \
-  --dashboard-name webhook-relay \
-  --dashboard-body file://dashboard.json
-```
-
-### Alarms
-
-Set up alarms for:
-- RDS CPU > 80%
-- RDS storage < 20%
-- Redis memory > 80%
-- NAT Gateway errors
-
-Example:
-```bash
-aws cloudwatch put-metric-alarm \
-  --alarm-name webhook-relay-rds-cpu \
-  --alarm-description "RDS CPU utilization" \
-  --metric-name CPUUtilization \
-  --namespace AWS/RDS \
-  --statistic Average \
-  --period 300 \
-  --threshold 80 \
-  --comparison-operator GreaterThanThreshold \
-  --evaluation-periods 2
-```
-
-## 🔄 Backup & Recovery
-
-### RDS Backups
-
-Automated backups are configured:
-- Retention: 7 days
-- Backup window: 03:00-04:00 UTC
-- Maintenance window: Monday 04:00-05:00 UTC
-
-### Manual Snapshot
-
-```bash
-aws rds create-db-snapshot \
-  --db-instance-identifier webhook-relay-prod-postgres \
-  --db-snapshot-identifier webhook-relay-manual-$(date +%Y%m%d)
-```
-
-### Restore from Snapshot
-
-```bash
-aws rds restore-db-instance-from-db-snapshot \
-  --db-instance-identifier webhook-relay-restored \
-  --db-snapshot-identifier webhook-relay-manual-20240115
+  --region us-east-1
 ```
 
 ## 🐛 Troubleshooting
 
-### Stack Creation Failed
-
-1. Check events:
+### Deployment Failed
 ```bash
+# Check events
 aws cloudformation describe-stack-events \
   --stack-name webhook-relay-prod \
+  --region us-east-1 \
   --query 'StackEvents[?ResourceStatus==`CREATE_FAILED`]'
 ```
 
-2. Common issues:
-   - Insufficient IAM permissions
-   - Service limits exceeded
-   - Invalid parameter values
+### Deletion Failed
+```bash
+# Check what's blocking deletion
+aws cloudformation describe-stack-resources \
+  --stack-name webhook-relay-prod \
+  --region us-east-1 \
+  --query 'StackResources[?ResourceStatus!=`DELETE_COMPLETE`]'
+```
 
-### Can't Connect to RDS
+### S3 Bucket Not Emptying
+```bash
+# Manually empty bucket
+aws s3 rm s3://bucket-name --recursive --region us-east-1
 
-1. Check security group rules
-2. Verify you're connecting from allowed source
-3. Check RDS is in available state
-4. Verify credentials in Secrets Manager
-
-### S3 Access Denied
-
-1. Check IAM role has S3 permissions
-2. Verify bucket policy
-3. Check bucket exists in correct region
+# Delete all versions
+aws s3api delete-objects --bucket bucket-name \
+  --delete "$(aws s3api list-object-versions \
+  --bucket bucket-name \
+  --query '{Objects: Versions[].{Key:Key,VersionId:VersionId}}')"
+```
 
 ## 📚 Additional Resources
 
-- [AWS CloudFormation Documentation](https://docs.aws.amazon.com/cloudformation/)
-- [RDS Best Practices](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/CHAP_BestPractices.html)
-- [ElastiCache Best Practices](https://docs.aws.amazon.com/AmazonElastiCache/latest/red-ug/BestPractices.html)
-- [VPC Best Practices](https://docs.aws.amazon.com/vpc/latest/userguide/vpc-security-best-practices.html)
+- [Full Deployment Guide](../DEPLOYMENT_GUIDE.md)
+- [CloudFormation Template](./webhook-relay-stack.yaml)
+- [AWS CloudFormation Docs](https://docs.aws.amazon.com/cloudformation/)
 
-## 🆘 Support
+## ⚠️ Important Notes
 
-For issues:
-1. Check CloudFormation events
-2. Review CloudWatch logs
-3. Verify AWS service limits
-4. Check AWS Service Health Dashboard
+1. **Database Password:** Must be at least 8 characters
+2. **Region:** Ensure all resources are in the same region
+3. **Costs:** Resources incur charges while running
+4. **Cleanup:** Always run cleanup-all.sh when done with demo
+5. **Backups:** RDS snapshots are retained after deletion
+
+## 🔐 Security
+
+- Database credentials stored in Secrets Manager
+- Resources deployed in private subnets
+- Security groups restrict access
+- IAM roles follow least-privilege principle
 
 ---
 
-**Note:** Always test in a non-production environment first!
+**Made with Bob**

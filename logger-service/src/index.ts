@@ -2,11 +2,13 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import dotenv from 'dotenv';
+import path from 'path';
 import { createServiceLogger, connectDatabase } from 'shared';
 import logsRouter from './routes/logs';
 import healthRouter from './routes/health';
 
-dotenv.config();
+// Load .env from project root
+dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
 const app = express();
 const PORT = process.env.LOGGER_PORT || 3002;

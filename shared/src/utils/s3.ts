@@ -1,15 +1,34 @@
 import AWS from 'aws-sdk';
 import { logger } from './logger';
 
-const s3 = new AWS.S3({
-  region: process.env.AWS_REGION || 'us-east-1',
-});
+let s3: AWS.S3 | null = null;
+let bucketName: string;
 
-const bucketName = process.env.S3_BUCKET_NAME || 'webhook-relay-payloads';
+function getS3Client(): AWS.S3 {
+  if (!s3) {
+    // Configure AWS SDK globally
+    AWS.config.update({
+      region: process.env.AWS_REGION || 'us-east-1',
+      accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+    });
+    
+    s3 = new AWS.S3();
+    bucketName = process.env.S3_BUCKET_NAME || 'webhook-relay-payloads';
+    
+    logger.info('S3 client initialized', {
+      region: process.env.AWS_REGION,
+      bucket: bucketName,
+      hasAccessKey: !!process.env.AWS_ACCESS_KEY_ID,
+    });
+  }
+  return s3;
+}
 
 export class S3Storage {
   async uploadPayload(key: string, data: any): Promise<string> {
     try {
+      const client = getS3Client();
       const params = {
         Bucket: bucketName,
         Key: key,
@@ -17,7 +36,7 @@ export class S3Storage {
         ContentType: 'application/json',
       };
 
-      await s3.putObject(params).promise();
+      await client.putObject(params).promise();
       logger.info(`Uploaded payload to S3: ${key}`);
       return key;
     } catch (error) {
@@ -28,12 +47,13 @@ export class S3Storage {
 
   async getPayload(key: string): Promise<any> {
     try {
+      const client = getS3Client();
       const params = {
         Bucket: bucketName,
         Key: key,
       };
 
-      const result = await s3.getObject(params).promise();
+      const result = await client.getObject(params).promise();
       return JSON.parse(result.Body?.toString() || '{}');
     } catch (error) {
       logger.error('Failed to retrieve from S3', { error, key });
@@ -43,12 +63,13 @@ export class S3Storage {
 
   async deletePayload(key: string): Promise<void> {
     try {
+      const client = getS3Client();
       const params = {
         Bucket: bucketName,
         Key: key,
       };
 
-      await s3.deleteObject(params).promise();
+      await client.deleteObject(params).promise();
       logger.info(`Deleted payload from S3: ${key}`);
     } catch (error) {
       logger.error('Failed to delete from S3', { error, key });

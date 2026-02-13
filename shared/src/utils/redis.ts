@@ -2,36 +2,42 @@ import Redis from 'ioredis';
 import { logger } from './logger';
 import { QueueMessage } from '../types';
 
-const redisConfig = {
-  host: process.env.REDIS_HOST || 'localhost',
-  port: parseInt(process.env.REDIS_PORT || '6379'),
-  password: process.env.REDIS_PASSWORD || undefined,
-  retryStrategy: (times: number) => {
-    const delay = Math.min(times * 50, 2000);
-    return delay;
-  },
-};
+function getRedisConfig() {
+  return {
+    host: process.env.REDIS_HOST || 'localhost',
+    port: parseInt(process.env.REDIS_PORT || '6379'),
+    password: process.env.REDIS_PASSWORD || undefined,
+    retryStrategy: (times: number) => {
+      const delay = Math.min(times * 50, 2000);
+      return delay;
+    },
+  };
+}
 
 export class RedisQueue {
-  private client: Redis;
-  private subscriber: Redis;
+  private client: Redis | null = null;
+  private subscriber: Redis | null = null;
 
-  constructor() {
-    this.client = new Redis(redisConfig);
-    this.subscriber = new Redis(redisConfig);
+  private ensureConnected() {
+    if (!this.client) {
+      const config = getRedisConfig();
+      this.client = new Redis(config);
+      this.subscriber = new Redis(config);
 
-    this.client.on('error', (err) => {
-      logger.error('Redis client error', { error: err });
-    });
+      this.client.on('error', (err) => {
+        logger.error('Redis client error', { error: err });
+      });
 
-    this.subscriber.on('error', (err) => {
-      logger.error('Redis subscriber error', { error: err });
-    });
+      this.subscriber.on('error', (err) => {
+        logger.error('Redis subscriber error', { error: err });
+      });
+    }
   }
 
   async enqueue(queue: string, message: QueueMessage): Promise<void> {
+    this.ensureConnected();
     try {
-      await this.client.lpush(queue, JSON.stringify(message));
+      await this.client!.lpush(queue, JSON.stringify(message));
       logger.info(`Enqueued message to ${queue}`, { eventId: message.eventId });
     } catch (error) {
       logger.error('Failed to enqueue message', { error, queue });
@@ -40,8 +46,9 @@ export class RedisQueue {
   }
 
   async dequeue(queue: string, timeout: number = 0): Promise<QueueMessage | null> {
+    this.ensureConnected();
     try {
-      const result = await this.client.brpop(queue, timeout);
+      const result = await this.client!.brpop(queue, timeout);
       if (!result) return null;
 
       const [, message] = result;
@@ -53,9 +60,10 @@ export class RedisQueue {
   }
 
   async scheduleRetry(message: QueueMessage, delaySeconds: number): Promise<void> {
+    this.ensureConnected();
     try {
       const score = Date.now() + delaySeconds * 1000;
-      await this.client.zadd('retry_queue', score, JSON.stringify(message));
+      await this.client!.zadd('retry_queue', score, JSON.stringify(message));
       logger.info(`Scheduled retry for event ${message.eventId} in ${delaySeconds}s`);
     } catch (error) {
       logger.error('Failed to schedule retry', { error, eventId: message.eventId });
@@ -64,12 +72,13 @@ export class RedisQueue {
   }
 
   async getRetryMessages(): Promise<QueueMessage[]> {
+    this.ensureConnected();
     try {
       const now = Date.now();
-      const messages = await this.client.zrangebyscore('retry_queue', 0, now);
+      const messages = await this.client!.zrangebyscore('retry_queue', 0, now);
       
       if (messages.length > 0) {
-        await this.client.zremrangebyscore('retry_queue', 0, now);
+        await this.client!.zremrangebyscore('retry_queue', 0, now);
       }
 
       return messages.map(msg => JSON.parse(msg));
@@ -80,8 +89,9 @@ export class RedisQueue {
   }
 
   async publish(channel: string, message: any): Promise<void> {
+    this.ensureConnected();
     try {
-      await this.client.publish(channel, JSON.stringify(message));
+      await this.client!.publish(channel, JSON.stringify(message));
     } catch (error) {
       logger.error('Failed to publish message', { error, channel });
       throw error;
@@ -89,9 +99,10 @@ export class RedisQueue {
   }
 
   async subscribe(channel: string, callback: (message: any) => void): Promise<void> {
+    this.ensureConnected();
     try {
-      await this.subscriber.subscribe(channel);
-      this.subscriber.on('message', (ch, msg) => {
+      await this.subscriber!.subscribe(channel);
+      this.subscriber!.on('message', (ch, msg) => {
         if (ch === channel) {
           callback(JSON.parse(msg));
         }
@@ -103,8 +114,12 @@ export class RedisQueue {
   }
 
   async disconnect(): Promise<void> {
-    await this.client.quit();
-    await this.subscriber.quit();
+    if (this.client) {
+      await this.client.quit();
+    }
+    if (this.subscriber) {
+      await this.subscriber.quit();
+    }
   }
 }
 

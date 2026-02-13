@@ -62,7 +62,7 @@ echo "Setting up lifecycle policy..."
 cat > /tmp/lifecycle.json <<EOF
 {
   "Rules": [{
-    "Id": "ArchiveOldPayloads",
+    "ID": "ArchiveOldPayloads",
     "Status": "Enabled",
     "Prefix": "",
     "Transitions": [{
