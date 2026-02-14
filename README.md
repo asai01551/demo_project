@@ -65,6 +65,44 @@ A production-ready microservices system for receiving, logging, and forwarding w
 - Endpoint management
 - Statistics visualization
 
+## ☁️ AWS Deployment (Production)
+
+### One-Command Deployment
+
+Deploy the complete application to AWS with infrastructure and services:
+
+```bash
+cd cloudformation
+./deploy.sh
+```
+
+This deploys:
+- ✅ **EC2 Auto Scaling Group** with Application Load Balancer
+- ✅ **RDS PostgreSQL** (Multi-AZ, production-ready)
+- ✅ **ElastiCache Redis** for queue management
+- ✅ **S3 Bucket** for webhook payloads
+- ✅ **VPC** with public/private subnets
+- ✅ **All 4 microservices** running on EC2
+
+**Time:** 25-35 minutes | **Cost:** ~$190-250/month
+
+After deployment, you'll get:
+```
+🌐 Your Application URLs:
+  Dashboard:      http://your-alb-url.elb.amazonaws.com
+  Webhook API:    http://your-alb-url.elb.amazonaws.com/webhook
+```
+
+### Cleanup
+
+Delete everything with one command:
+```bash
+cd cloudformation
+./delete-stack.sh --force
+```
+
+📖 **Full AWS deployment guide:** [AWS_DEPLOYMENT.md](./AWS_DEPLOYMENT.md)
+
 ## 🚀 Quick Start
 
 ### Prerequisites

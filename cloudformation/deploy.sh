@@ -16,6 +16,7 @@ NC='\033[0m' # No Color
 STACK_NAME="webhook-relay-prod"
 REGION="us-east-1"
 DB_PASSWORD=""
+DEPLOY_APP="true"
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -32,14 +33,19 @@ while [[ $# -gt 0 ]]; do
             DB_PASSWORD="$2"
             shift 2
             ;;
+        --skip-app-deployment)
+            DEPLOY_APP="false"
+            shift
+            ;;
         --help)
             echo "Usage: ./deploy.sh [OPTIONS]"
             echo ""
             echo "Options:"
             echo "  --stack-name NAME     CloudFormation stack name (default: webhook-relay-prod)"
-            echo "  --region REGION       AWS region (default: us-east-1)"
-            echo "  --db-password PASS    Database password (will prompt if not provided)"
-            echo "  --help                Show this help message"
+            echo "  --region REGION           AWS region (default: us-east-1)"
+            echo "  --db-password PASS        Database password (will prompt if not provided)"
+            echo "  --skip-app-deployment     Skip application deployment to EC2 (infrastructure only)"
+            echo "  --help                    Show this help message"
             echo ""
             exit 0
             ;;
@@ -149,18 +155,65 @@ if [ $? -eq 0 ]; then
         --output table
     
     echo ""
-    echo -e "${GREEN}Next Steps:${NC}"
-    echo "1. Note the RDS endpoint and Redis endpoint from outputs above"
-    echo "2. Update your .env file with these values"
-    echo "3. Run database migrations:"
-    echo "   DATABASE_URL='<connection-string-from-output>' npx prisma migrate deploy"
-    echo "4. Deploy your application to EC2/ECS/EKS"
-    echo ""
+    
+    # Deploy application to EC2 if not skipped
+    if [ "$DEPLOY_APP" = "true" ]; then
+        echo -e "${GREEN}========================================${NC}"
+        echo -e "${GREEN}🚀 Deploying Application to EC2...${NC}"
+        echo -e "${GREEN}========================================${NC}"
+        echo ""
+        
+        # Wait a bit for EC2 instance to be fully ready
+        echo -e "${YELLOW}Waiting for EC2 instance to be ready...${NC}"
+        sleep 30
+        
+        # Run deployment script
+        cd ..
+        chmod +x scripts/deploy-to-ec2.sh
+        ./scripts/deploy-to-ec2.sh "$STACK_NAME"
+        
+        if [ $? -eq 0 ]; then
+            echo ""
+            echo -e "${GREEN}========================================${NC}"
+            echo -e "${GREEN}✅ Complete Deployment Successful!${NC}"
+            echo -e "${GREEN}========================================${NC}"
+            echo ""
+            
+            # Get Load Balancer URL
+            LB_DNS=$(aws cloudformation describe-stacks \
+                --stack-name $STACK_NAME \
+                --region $REGION \
+                --query 'Stacks[0].Outputs[?OutputKey==`LoadBalancerDNS`].OutputValue' \
+                --output text)
+            
+            echo -e "${GREEN}🌐 Your Application URLs:${NC}"
+            echo ""
+            echo -e "  Dashboard:      ${GREEN}http://$LB_DNS${NC}"
+            echo -e "  Webhook API:    ${GREEN}http://$LB_DNS/webhook${NC}"
+            echo -e "  Health Check:   ${GREEN}http://$LB_DNS/health${NC}"
+            echo ""
+            echo -e "${YELLOW}⏳ Note: Services may take 5-10 minutes to fully start${NC}"
+            echo -e "${YELLOW}   Monitor health checks in the AWS Console${NC}"
+            echo ""
+        else
+            echo ""
+            echo -e "${YELLOW}⚠️  Infrastructure deployed but application deployment failed${NC}"
+            echo -e "${YELLOW}   You can retry with: ./scripts/deploy-to-ec2.sh $STACK_NAME${NC}"
+            echo ""
+        fi
+    else
+        echo ""
+        echo -e "${GREEN}Next Steps:${NC}"
+        echo "1. Deploy application to EC2:"
+        echo "   cd .. && ./scripts/deploy-to-ec2.sh $STACK_NAME"
+        echo ""
+    fi
+    
     echo "To get outputs again:"
     echo "  ./get-outputs.sh --stack-name $STACK_NAME --region $REGION"
     echo ""
-    echo "To delete the stack:"
-    echo "  ./delete-stack.sh --stack-name $STACK_NAME --region $REGION"
+    echo "To delete everything:"
+    echo "  ./delete-stack.sh --stack-name $STACK_NAME --region $REGION --force"
     
 else
     echo ""

@@ -277,16 +277,48 @@ Resources:
       VpcId: !Ref VPC
       SecurityGroupIngress:
         - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+          Description: SSH access
+        - IpProtocol: tcp
+          FromPort: 3001
+          ToPort: 3004
+          SourceSecurityGroupId: !Ref ALBSecurityGroup
+          Description: Application ports from ALB
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+          Description: Allow all outbound traffic
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-app-sg
+        - Key: Project
+          Value: webhook-relay
+
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for Application Load Balancer
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
           FromPort: 80
           ToPort: 80
           CidrIp: 0.0.0.0/0
+          Description: HTTP from internet
         - IpProtocol: tcp
           FromPort: 443
           ToPort: 443
           CidrIp: 0.0.0.0/0
+          Description: HTTPS from internet
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+          Description: Allow all outbound traffic
       Tags:
         - Key: Name
-          Value: !Sub ${EnvironmentName}-app-sg
+          Value: !Sub ${EnvironmentName}-alb-sg
         - Key: Project
           Value: webhook-relay
 
@@ -502,6 +534,225 @@ Resources:
         - Key: Project
           Value: webhook-relay
 
+  # ==================== Application Load Balancer ====================
+  ApplicationLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub ${EnvironmentName}-alb
+      Type: application
+      Scheme: internet-facing
+      IpAddressType: ipv4
+      Subnets:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+      SecurityGroups:
+        - !Ref ALBSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-alb
+        - Key: Project
+          Value: webhook-relay
+
+  # Target Groups
+  ReceiverTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub ${EnvironmentName}-receiver-tg
+      Port: 3001
+      Protocol: HTTP
+      VpcId: !Ref VPC
+      HealthCheckEnabled: true
+      HealthCheckPath: /health
+      HealthCheckProtocol: HTTP
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      TargetType: instance
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-receiver-tg
+        - Key: Project
+          Value: webhook-relay
+
+  DashboardTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub ${EnvironmentName}-dashboard-tg
+      Port: 3004
+      Protocol: HTTP
+      VpcId: !Ref VPC
+      HealthCheckEnabled: true
+      HealthCheckPath: /health
+      HealthCheckProtocol: HTTP
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      TargetType: instance
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-dashboard-tg
+        - Key: Project
+          Value: webhook-relay
+
+  # ALB Listener
+  ALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref DashboardTargetGroup
+
+  # Listener Rules
+  ReceiverListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref ALBListener
+      Priority: 10
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - /webhook/*
+            - /endpoints/*
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref ReceiverTargetGroup
+
+  # ==================== EC2 Launch Template ====================
+  EC2LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Sub ${EnvironmentName}-launch-template
+      LaunchTemplateData:
+        ImageId: !Sub '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}}'
+        InstanceType: t3.medium
+        IamInstanceProfile:
+          Arn: !GetAtt ServiceInstanceProfile.Arn
+        SecurityGroupIds:
+          - !Ref AppSecurityGroup
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            set -e
+            
+            # Update system
+            yum update -y
+            
+            # Install Node.js 20
+            curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
+            yum install -y nodejs git postgresql15
+            
+            # Install PM2 globally
+            npm install -g pm2
+            
+            # Create app directory
+            mkdir -p /opt/webhook-relay
+            cd /opt/webhook-relay
+            
+            # Clone repository (replace with your repo URL)
+            # For now, we'll create a deployment package
+            cat > /tmp/deploy.sh << 'DEPLOY_SCRIPT'
+            #!/bin/bash
+            cd /opt/webhook-relay
+            
+            # Set environment variables
+            export NODE_ENV=production
+            export DATABASE_URL="postgresql://${DBUsername}:${DBPassword}@${RDSInstance.Endpoint.Address}:${RDSInstance.Endpoint.Port}/${DBName}"
+            export REDIS_HOST="${RedisCluster.RedisEndpoint.Address}"
+            export REDIS_PORT="${RedisCluster.RedisEndpoint.Port}"
+            export S3_BUCKET_NAME="${WebhookPayloadsBucket}"
+            export AWS_REGION="${AWS::Region}"
+            export PORT_RECEIVER=3001
+            export PORT_LOGGER=3002
+            export PORT_FORWARDER=3003
+            export PORT_DASHBOARD=3004
+            
+            # Save to .env file
+            cat > /opt/webhook-relay/.env << ENV
+            NODE_ENV=production
+            DATABASE_URL=postgresql://${DBUsername}:${DBPassword}@${RDSInstance.Endpoint.Address}:${RDSInstance.Endpoint.Port}/${DBName}
+            REDIS_HOST=${RedisCluster.RedisEndpoint.Address}
+            REDIS_PORT=${RedisCluster.RedisEndpoint.Port}
+            S3_BUCKET_NAME=${WebhookPayloadsBucket}
+            AWS_REGION=${AWS::Region}
+            PORT=3001
+            ENV
+            
+            echo "Environment configured"
+            DEPLOY_SCRIPT
+            
+            chmod +x /tmp/deploy.sh
+            
+            # Create systemd service for deployment
+            cat > /etc/systemd/system/webhook-relay-deploy.service << 'SERVICE'
+            [Unit]
+            Description=Webhook Relay Deployment
+            After=network.target
+            
+            [Service]
+            Type=oneshot
+            ExecStart=/tmp/deploy.sh
+            RemainAfterExit=yes
+            
+            [Install]
+            WantedBy=multi-user.target
+            SERVICE
+            
+            # Enable and start deployment
+            systemctl daemon-reload
+            systemctl enable webhook-relay-deploy
+            
+            # Signal CloudFormation
+            /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource AppAutoScalingGroup --region ${AWS::Region}
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value: !Sub ${EnvironmentName}-app-instance
+              - Key: Project
+                Value: webhook-relay
+
+  # ==================== Auto Scaling Group ====================
+  AppAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: !Sub ${EnvironmentName}-asg
+      VPCZoneIdentifier:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+      LaunchTemplate:
+        LaunchTemplateId: !Ref EC2LaunchTemplate
+        Version: !GetAtt EC2LaunchTemplate.LatestVersionNumber
+      MinSize: 1
+      MaxSize: 2
+      DesiredCapacity: 1
+      HealthCheckType: ELB
+      HealthCheckGracePeriod: 300
+      TargetGroupARNs:
+        - !Ref ReceiverTargetGroup
+        - !Ref DashboardTargetGroup
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-app-instance
+          PropagateAtLaunch: true
+        - Key: Project
+          Value: webhook-relay
+          PropagateAtLaunch: true
+    CreationPolicy:
+      ResourceSignal:
+        Count: 1
+        Timeout: PT15M
+    UpdatePolicy:
+      AutoScalingRollingUpdate:
+        MinInstancesInService: 1
+        MaxBatchSize: 1
+        PauseTime: PT5M
+        WaitOnResourceSignals: true
+
 Outputs:
   VPCId:
     Description: VPC ID
@@ -584,5 +835,25 @@ Outputs:
     Value: !Ref AppSecurityGroup
     Export:
       Name: !Sub ${EnvironmentName}-AppSecurityGroup
+
+  LoadBalancerDNS:
+    Description: Application Load Balancer DNS Name
+    Value: !GetAtt ApplicationLoadBalancer.DNSName
+    Export:
+      Name: !Sub ${EnvironmentName}-LoadBalancerDNS
+
+  DashboardURL:
+    Description: Dashboard URL
+    Value: !Sub http://${ApplicationLoadBalancer.DNSName}
+
+  WebhookReceiverURL:
+    Description: Webhook Receiver API URL
+    Value: !Sub http://${ApplicationLoadBalancer.DNSName}/webhook
+
+  LoadBalancerArn:
+    Description: Application Load Balancer ARN
+    Value: !Ref ApplicationLoadBalancer
+    Export:
+      Name: !Sub ${EnvironmentName}-LoadBalancerArn
 
 # Made with Bob
